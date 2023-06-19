@@ -1,2 +1,5 @@
-# plugin-starter
-ikaros plugin starter template
+# plugin-local-files-import
+ikaros 本地文件批量导入插件
+
+目前的方案是，启动的时候，检查当前应用工作目录下，是否有 `links` 目录存在，并且该目录下存在文件或者目录，
+在当前插件启动后，会启动时，会将所有文件导入到数据库的文件管理中。

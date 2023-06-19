@@ -1,16 +1,16 @@
 # A unique name, must eq var console/vite.config.js#pluginEntryName,
 # and can not contain specific symbol such as - .
-name: PluginStarter
+name: PluginLocalFilesImport
 # plugin entry class that extends BasePlugin
-clazz: run.ikaros.plugin.starter.StarterPlugin
+clazz: run.ikaros.plugin.file.LocalFilesImportPlugin
 # plugin 'version' is a valid semantic version string (see semver.org).
-version: 1.0.0-SNAPSHOT
-requires: "*"
+version: 0.1.0
+requires: ">=0.2.1"
 author:
   name: Ikaros OSS Team
   website: https://github.com/ikaros-dev
-logo: https://github.com/ikaros-dev/ikaros/blob/master/assets/logo.png
-homepage: https://github.com/ikaros-dev/plugin-starter
-displayName: "插件快速开始模板"
-description: "这是一个插件快速开始模板"
+logo: https://ikaros.run/logo.png
+homepage: https://github.com/ikaros-dev/plugin-local-files-import
+displayName: "本地文件导入"
+description: "本地文件批量导入插件"
 license: "AGPL-3.0"
