@@ -14,6 +14,7 @@ import run.ikaros.api.store.enums.FilePlace;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -89,7 +90,7 @@ public class LocalFilesImportPlugin extends BasePlugin {
         } catch (FileAlreadyExistsException fileAlreadyExistsException) {
             log.debug("file already exists for path: [{}].", uploadFile.getAbsolutePath());
             return null;
-        } catch (SecurityException securityException) {
+        } catch (FileSystemException fileSystemException) {
             // 硬链接失败则进行复制
             log.warn("file hard links fail from: {}, to: {}",
                 file.getAbsolutePath(), uploadFile.getAbsolutePath());
