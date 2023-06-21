@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
 import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
 
@@ -108,6 +109,8 @@ public class LocalFilesImportPlugin extends BasePlugin {
         fileEntity.setType(FileUtils.parseTypeByPostfix(filePostfix));
         fileEntity.setOriginalPath(file.getAbsolutePath());
         fileEntity.setSize(file.length());
+        fileEntity.setUpdateTime(LocalDateTime.now());
+        fileEntity.setCreateTime(LocalDateTime.now());
         return fileEntity;
     }
 
