@@ -3,12 +3,10 @@ package run.ikaros.plugin.file;
 import org.pf4j.PluginWrapper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
-import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import run.ikaros.api.core.file.FileOperate;
 import run.ikaros.api.infra.properties.IkarosProperties;
 import run.ikaros.api.infra.utils.FileUtils;
-import run.ikaros.api.infra.utils.SystemVarUtils;
 import run.ikaros.api.plugin.BasePlugin;
 import run.ikaros.api.store.entity.FileEntity;
 import run.ikaros.api.store.enums.FilePlace;
@@ -19,8 +17,6 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicReference;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -110,7 +106,7 @@ public class LocalFilesImportPlugin extends BasePlugin {
             uploadFilePath.replace(ikarosProperties.getWorkDir().toFile().getAbsolutePath(), "")
                 .replace("\\", "/"));
         fileEntity.setType(FileUtils.parseTypeByPostfix(filePostfix));
-        fileEntity.setOriginalPath(uploadFilePath);
+        fileEntity.setOriginalPath(file.getAbsolutePath());
         fileEntity.setSize(file.length());
         return fileEntity;
     }
@@ -193,9 +189,9 @@ public class LocalFilesImportPlugin extends BasePlugin {
                 // fileEntity.setOriginalPath(uploadFilePath);
                 // fileOperate.create(fileEntity)
                 //     .subscribeOn(Schedulers.boundedElastic()).subscribe();
-                log.debug("create file entity form original dir for file path={}",
-                    file.getAbsolutePath());
-                log.debug("success link file form path={}", file.getAbsolutePath());
+                // log.debug("save file entity form original dir for file path={}",
+                //     file.getAbsolutePath());
+                // log.debug("success link file form path={}", file.getAbsolutePath());
             } catch (Exception e) {
                 log.error("exec handleLinkDirFile exception", e);
             }
