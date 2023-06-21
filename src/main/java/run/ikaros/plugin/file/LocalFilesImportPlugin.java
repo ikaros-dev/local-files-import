@@ -85,17 +85,17 @@ public class LocalFilesImportPlugin extends BasePlugin {
 
         try {
             Files.createLink(uploadFile.toPath(), file.toPath());
-            log.debug("copy file hard link from: {}, to: {}",
+            log.info("copy file hard link from: {}, to: {}",
                 file.getAbsolutePath(), uploadFile.getAbsolutePath());
         } catch (FileAlreadyExistsException fileAlreadyExistsException) {
-            log.debug("file already exists for path: [{}].", uploadFile.getAbsolutePath());
+            log.warn("file already exists for path: [{}].", uploadFile.getAbsolutePath());
             return null;
         } catch (FileSystemException fileSystemException) {
             // 硬链接失败则进行复制
             log.warn("file hard links fail from: {}, to: {}",
                 file.getAbsolutePath(), uploadFile.getAbsolutePath());
             Files.copy(file.toPath(), uploadFile.toPath());
-            log.debug("copy file from: {}, to: {}",
+            log.info("copy file from: {}, to: {}",
                 file.getAbsolutePath(), uploadFile.getAbsolutePath());
         }
 
