@@ -9,7 +9,6 @@ import run.ikaros.api.infra.properties.IkarosProperties;
 import run.ikaros.api.infra.utils.FileUtils;
 import run.ikaros.api.plugin.BasePlugin;
 import run.ikaros.api.store.entity.FileEntity;
-import run.ikaros.api.store.enums.FilePlace;
 
 import java.io.File;
 import java.io.IOException;
@@ -100,17 +99,16 @@ public class LocalFilesImportPlugin extends BasePlugin {
         }
 
         FileEntity fileEntity = new FileEntity();
-        fileEntity.setPlace(FilePlace.LOCAL);
         fileEntity.setName(name);
         fileEntity.setOriginalName(name);
         fileEntity.setType(FileUtils.parseTypeByPostfix(filePostfix));
         fileEntity.setUrl(
             uploadFilePath.replace(ikarosProperties.getWorkDir().toFile().getAbsolutePath(), "")
                 .replace("\\", "/"));
+        fileEntity.setCanRead(true);
         fileEntity.setType(FileUtils.parseTypeByPostfix(filePostfix));
         fileEntity.setOriginalPath(file.getAbsolutePath());
         fileEntity.setSize(file.length());
-        fileEntity.setUpdateTime(LocalDateTime.now());
         fileEntity.setCreateTime(LocalDateTime.now());
         return fileEntity;
     }
