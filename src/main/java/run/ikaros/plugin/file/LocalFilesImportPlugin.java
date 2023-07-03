@@ -3,12 +3,16 @@ package run.ikaros.plugin.file;
 import org.pf4j.PluginWrapper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+import run.ikaros.api.constant.FileConst;
 import run.ikaros.api.core.file.FileOperate;
+import run.ikaros.api.core.file.Folder;
+import run.ikaros.api.core.file.FolderOperate;
 import run.ikaros.api.infra.properties.IkarosProperties;
 import run.ikaros.api.infra.utils.FileUtils;
 import run.ikaros.api.plugin.BasePlugin;
-import run.ikaros.api.store.entity.FileEntity;
 
 import java.io.File;
 import java.io.IOException;
@@ -17,6 +21,7 @@ import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
 
@@ -26,12 +31,14 @@ public class LocalFilesImportPlugin extends BasePlugin {
     private static final String NAME = "PluginLocalFilesImport";
     private final IkarosProperties ikarosProperties;
     private final FileOperate fileOperate;
+    private final FolderOperate folderOperate;
 
     public LocalFilesImportPlugin(PluginWrapper wrapper, IkarosProperties ikarosProperties,
-                                  FileOperate fileOperate) {
+                                  FileOperate fileOperate, FolderOperate folderOperate) {
         super(wrapper);
         this.ikarosProperties = ikarosProperties;
         this.fileOperate = fileOperate;
+        this.folderOperate = folderOperate;
     }
 
 
@@ -66,12 +73,15 @@ public class LocalFilesImportPlugin extends BasePlugin {
             log.info("mkdir links dir, path={}", linksDir);
         }
 
-        handleImportDirFile(linksDir);
+        handleImportDirFile(linksDir, FileConst.DEFAULT_FOLDER_ROOT_ID)
+            .subscribeOn(Schedulers.boundedElastic())
+            .subscribe();
 
         log.info("end import links dir files, time: {}", System.currentTimeMillis() - start);
     }
 
-    private FileEntity handleSingle(File file) throws IOException {
+    private run.ikaros.api.core.file.File handleSingle(File file, Long parentId)
+        throws IOException {
         // 创建上传文件目录
         String name = file.getName();
         String filePostfix = FileUtils.parseFilePostfix(name);
@@ -98,105 +108,50 @@ public class LocalFilesImportPlugin extends BasePlugin {
                 file.getAbsolutePath(), uploadFile.getAbsolutePath());
         }
 
-        FileEntity fileEntity = new FileEntity();
-        fileEntity.setName(name);
-        fileEntity.setOriginalName(name);
-        fileEntity.setType(FileUtils.parseTypeByPostfix(filePostfix));
-        fileEntity.setUrl(
+        run.ikaros.api.core.file.File fileDto = new run.ikaros.api.core.file.File();
+        fileDto.setFolderId(parentId);
+        fileDto.setName(name);
+        fileDto.setOriginalName(name);
+        fileDto.setType(FileUtils.parseTypeByPostfix(filePostfix));
+        fileDto.setUrl(
             uploadFilePath.replace(ikarosProperties.getWorkDir().toFile().getAbsolutePath(), "")
                 .replace("\\", "/"));
-        fileEntity.setCanRead(true);
-        fileEntity.setType(FileUtils.parseTypeByPostfix(filePostfix));
-        fileEntity.setOriginalPath(file.getAbsolutePath());
-        fileEntity.setSize(file.length());
-        fileEntity.setCreateTime(LocalDateTime.now());
-        return fileEntity;
+        fileDto.setCanRead(true);
+        fileDto.setType(FileUtils.parseTypeByPostfix(filePostfix));
+        fileDto.setOriginalPath(file.getAbsolutePath());
+        fileDto.setSize(file.length());
+        fileDto.setCreateTime(LocalDateTime.now());
+        return fileDto;
     }
 
 
-    private void handleImportDirFile(File file) {
+    private Mono<Void> handleImportDirFile(File file, Long parentId) {
         if (file.isDirectory()) {
             // dir
-            for (File f : Objects.requireNonNull(file.listFiles())) {
-                handleImportDirFile(f);
-            }
+            return folderOperate.create(parentId, file.getName())
+                .map(Folder::getId)
+                .flatMapMany(id -> Flux.fromStream(Arrays.stream(
+                        Objects.requireNonNull(file.listFiles())))
+                    .flatMap(file1 -> handleImportDirFile(file1, id)))
+                .then();
         } else {
             // file
             if (!file.exists()) {
-                return;
+                return Mono.empty();
             }
 
-            try {
-                fileOperate.existsByOriginalPath(file.getAbsolutePath())
-                    .filter(exist -> !exist)
-                    .mapNotNull(exists -> {
-                        try {
-                            return handleSingle(file);
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    })
-                    .flatMap(fileOperate::create)
-                    .subscribeOn(Schedulers.boundedElastic()).subscribe();
+            return fileOperate.existsByOriginalPath(file.getAbsolutePath())
+                .filter(exist -> !exist)
+                .mapNotNull(exists -> {
+                    try {
+                        return handleSingle(file, parentId);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                })
+                .flatMap(fileOperate::create)
+                .then();
 
-
-                // AtomicReference<Boolean> hasExists = new AtomicReference<>(false);
-                // fileOperate.existsByOriginalPath(file.getAbsolutePath())
-                //     .subscribeOn(Schedulers.boundedElastic())
-                //     .subscribe(hasExists::set);
-
-                // // 查询文件是否已经导入
-                // if (hasExists.get()) {
-                //     log.debug("skip current file operate, "
-                //         + "file has exists in database for file: [{}].", file.getAbsolutePath());
-                //     return;
-                // }
-
-                // // 创建上传文件目录
-                // String name = file.getName();
-                // String filePostfix = FileUtils.parseFilePostfix(name);
-                // String uploadFilePath
-                //     = FileUtils.buildAppUploadFilePath(
-                //     ikarosProperties.getWorkDir().toFile().getAbsolutePath(),
-                //     filePostfix);
-                // File uploadFile = new File(uploadFilePath);
-
-                // boolean isHardLink = false;
-                // try {
-                //     Files.createLink(file.toPath(), uploadFile.toPath());
-                //     log.debug("copy file hard link from: {}, to: {}",
-                //         file.getAbsolutePath(), uploadFile.getAbsolutePath());
-                //     isHardLink = true;
-                // } catch (FileAlreadyExistsException fileAlreadyExistsException) {
-                //     log.debug("file already exists for path: [{}].", uploadFile.getAbsolutePath());
-                //     return;
-                // } catch (SecurityException securityException) {
-                //     // 硬链接失败则进行复制
-                //     log.warn("file hard links fail from: {}, to: {}",
-                //         file.getAbsolutePath(), uploadFile.getAbsolutePath());
-                //     Files.copy(file.toPath(), uploadFile.toPath());
-                //     log.debug("copy file from: {}, to: {}",
-                //         file.getAbsolutePath(), uploadFile.getAbsolutePath());
-                // }
-
-                // FileEntity fileEntity = new FileEntity();
-                // fileEntity.setPlace(FilePlace.LOCAL);
-                // fileEntity.setName(name);
-                // fileEntity.setOriginalName(name);
-                // fileEntity.setType(FileUtils.parseTypeByPostfix(filePostfix));
-                // fileEntity.setUrl(
-                //     uploadFilePath.replace(SystemVarUtils.getCurrentAppDirPath(), "")
-                //         .replace("\\", "/"));
-                // fileEntity.setType(FileUtils.parseTypeByPostfix(filePostfix));
-                // fileEntity.setOriginalPath(uploadFilePath);
-                // fileOperate.create(fileEntity)
-                //     .subscribeOn(Schedulers.boundedElastic()).subscribe();
-                // log.debug("save file entity form original dir for file path={}",
-                //     file.getAbsolutePath());
-                // log.debug("success link file form path={}", file.getAbsolutePath());
-            } catch (Exception e) {
-                log.error("exec handleLinkDirFile exception", e);
-            }
         }
     }
 }
