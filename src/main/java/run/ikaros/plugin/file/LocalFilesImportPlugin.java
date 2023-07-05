@@ -111,16 +111,15 @@ public class LocalFilesImportPlugin extends BasePlugin {
         run.ikaros.api.core.file.File fileDto = new run.ikaros.api.core.file.File();
         fileDto.setFolderId(parentId);
         fileDto.setName(name);
-        fileDto.setOriginalName(name);
         fileDto.setType(FileUtils.parseTypeByPostfix(filePostfix));
         fileDto.setUrl(
             uploadFilePath.replace(ikarosProperties.getWorkDir().toFile().getAbsolutePath(), "")
                 .replace("\\", "/"));
         fileDto.setCanRead(true);
         fileDto.setType(FileUtils.parseTypeByPostfix(filePostfix));
-        fileDto.setOriginalPath(file.getAbsolutePath());
+        fileDto.setFsPath(uploadFile.getAbsolutePath());
         fileDto.setSize(file.length());
-        fileDto.setCreateTime(LocalDateTime.now());
+        fileDto.setUpdateTime(LocalDateTime.now());
         return fileDto;
     }
 
@@ -140,7 +139,7 @@ public class LocalFilesImportPlugin extends BasePlugin {
                 return Mono.empty();
             }
 
-            return fileOperate.existsByOriginalPath(file.getAbsolutePath())
+            return fileOperate.existsByFsPath(file.getAbsolutePath())
                 .filter(exist -> !exist)
                 .mapNotNull(exists -> {
                     try {
