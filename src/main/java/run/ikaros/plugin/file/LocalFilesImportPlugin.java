@@ -3,6 +3,7 @@ package run.ikaros.plugin.file;
 import org.pf4j.PluginWrapper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.util.Assert;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -80,7 +81,7 @@ public class LocalFilesImportPlugin extends BasePlugin {
         log.info("end import links dir files, time: {}", System.currentTimeMillis() - start);
     }
 
-    private run.ikaros.api.core.file.File handleSingle(File file, Long parentId)
+    private run.ikaros.api.core.file.File handleSingle(File file, Long parentId, String md5)
         throws IOException {
         // 创建上传文件目录
         String name = file.getName();
@@ -112,6 +113,7 @@ public class LocalFilesImportPlugin extends BasePlugin {
         fileDto.setFolderId(parentId);
         fileDto.setName(name);
         fileDto.setType(FileUtils.parseTypeByPostfix(filePostfix));
+        fileDto.setMd5(md5);
         fileDto.setUrl(
             uploadFilePath.replace(ikarosProperties.getWorkDir().toFile().getAbsolutePath(), "")
                 .replace("\\", "/"));
@@ -139,17 +141,26 @@ public class LocalFilesImportPlugin extends BasePlugin {
                 return Mono.empty();
             }
 
-            return fileOperate.existsByFsPath(file.getAbsolutePath())
+
+            String md5 = "";
+            try {
+                md5 = FileUtils.calculateFileHash(FileUtils.convertToDataBufferFlux(file));
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            Assert.hasText(md5, "'md5' must has text.");
+
+            String finalMd = md5;
+            return fileOperate.existsByMd5(md5)
                 .filter(exist -> !exist)
-                .mapNotNull(exists -> {
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMap(exists -> {
                     try {
-                        return handleSingle(file, parentId);
+                        return fileOperate.create(handleSingle(file, parentId, finalMd)).then();
                     } catch (IOException e) {
-                        throw new RuntimeException(e);
+                        return Mono.error(new RuntimeException(e));
                     }
-                })
-                .flatMap(fileOperate::create)
-                .then();
+                });
 
         }
     }
