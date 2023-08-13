@@ -4,6 +4,7 @@ import org.pf4j.PluginWrapper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -75,8 +76,9 @@ public class LocalFilesImportPlugin extends BasePlugin {
         }
 
         handleImportDirFile(linksDir, FileConst.DEFAULT_FOLDER_ROOT_ID)
-            .subscribeOn(Schedulers.boundedElastic())
+            .subscribeOn(Schedulers.parallel())
             .subscribe();
+
 
         log.info("end import links dir files, time: {}", System.currentTimeMillis() - start);
     }
@@ -128,6 +130,10 @@ public class LocalFilesImportPlugin extends BasePlugin {
 
     private Mono<Void> handleImportDirFile(File file, Long parentId) {
         if (file.isDirectory()) {
+            // ignore . and .. create dir.
+            if (".".equalsIgnoreCase(file.getName()) || "..".equalsIgnoreCase(file.getName())) {
+                return Mono.empty();
+            }
             // dir
             return folderOperate.create(parentId, file.getName())
                 .map(Folder::getId)
@@ -153,7 +159,7 @@ public class LocalFilesImportPlugin extends BasePlugin {
             String finalMd = md5;
             return fileOperate.existsByMd5(md5)
                 .filter(exist -> !exist)
-                .subscribeOn(Schedulers.boundedElastic())
+                .subscribeOn(Schedulers.parallel())
                 .flatMap(exists -> {
                     try {
                         return fileOperate.create(handleSingle(file, parentId, finalMd)).then();
