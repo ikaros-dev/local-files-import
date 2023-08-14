@@ -65,7 +65,7 @@ public class LocalFilesImportPlugin extends BasePlugin {
     protected void linkFiles() {
         log.info("start import links dir files.");
         long start = System.currentTimeMillis();
-        Path links = ikarosProperties.getWorkDir().resolve("links");
+        Path links = ikarosProperties.getWorkDir().resolve(FileConst.DEFAULT_IMPORT_DIR_NAME);
         File linksDir = links.toFile();
         if (linksDir.isFile()) {
             throw new LocalFilesImportException("current links must dir.");
@@ -75,7 +75,13 @@ public class LocalFilesImportPlugin extends BasePlugin {
             log.info("mkdir links dir, path={}", linksDir);
         }
 
-        handleImportDirFile(linksDir, FileConst.DEFAULT_FOLDER_ROOT_ID)
+        folderOperate.findByParentIdAndName(FileConst.DEFAULT_FOLDER_ROOT_ID,
+                FileConst.DEFAULT_IMPORT_DIR_NAME)
+            .switchIfEmpty(folderOperate.create(FileConst.DEFAULT_FOLDER_ROOT_ID,
+                FileConst.DEFAULT_IMPORT_DIR_NAME)
+                .doOnSuccess(folder -> log.info("create links dir and id={}", folder.getId())))
+            .map(Folder::getId)
+            .flatMap(linksFolderId -> handleImportDirFile(linksDir, linksFolderId))
             .subscribeOn(Schedulers.parallel())
             .subscribe();
 
@@ -83,7 +89,7 @@ public class LocalFilesImportPlugin extends BasePlugin {
         log.info("end import links dir files, time: {}", System.currentTimeMillis() - start);
     }
 
-    private run.ikaros.api.core.file.File handleSingle(File file, Long parentId, String md5)
+    private run.ikaros.api.core.file.File handleSingle(File file, Long parentId)
         throws IOException {
         // 创建上传文件目录
         String name = file.getName();
@@ -115,12 +121,10 @@ public class LocalFilesImportPlugin extends BasePlugin {
         fileDto.setFolderId(parentId);
         fileDto.setName(name);
         fileDto.setType(FileUtils.parseTypeByPostfix(filePostfix));
-        fileDto.setMd5(md5);
         fileDto.setUrl(
             uploadFilePath.replace(ikarosProperties.getWorkDir().toFile().getAbsolutePath(), "")
                 .replace("\\", "/"));
         fileDto.setCanRead(true);
-        fileDto.setType(FileUtils.parseTypeByPostfix(filePostfix));
         fileDto.setFsPath(uploadFile.getAbsolutePath());
         fileDto.setSize(file.length());
         fileDto.setUpdateTime(LocalDateTime.now());
@@ -148,21 +152,12 @@ public class LocalFilesImportPlugin extends BasePlugin {
             }
 
 
-            String md5 = "";
-            try {
-                md5 = FileUtils.calculateFileHash(FileUtils.convertToDataBufferFlux(file));
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            Assert.hasText(md5, "'md5' must has text.");
 
-            String finalMd = md5;
-            return fileOperate.existsByMd5(md5)
+            return fileOperate.existsByFolderIdAndFileName(parentId, file.getName())
                 .filter(exist -> !exist)
-                .subscribeOn(Schedulers.parallel())
                 .flatMap(exists -> {
                     try {
-                        return fileOperate.create(handleSingle(file, parentId, finalMd)).then();
+                        return fileOperate.create(handleSingle(file, parentId)).then();
                     } catch (IOException e) {
                         return Mono.error(new RuntimeException(e));
                     }
