@@ -27,6 +27,8 @@ import java.util.Arrays;
 import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
 
+import static run.ikaros.api.constant.FileConst.DEFAULT_FOLDER_ROOT_ID;
+
 @Slf4j
 @Component
 public class LocalFilesImportPlugin extends BasePlugin {
@@ -75,16 +77,9 @@ public class LocalFilesImportPlugin extends BasePlugin {
             log.info("mkdir links dir, path={}", linksDir);
         }
 
-        folderOperate.findByParentIdAndName(FileConst.DEFAULT_FOLDER_ROOT_ID,
-                FileConst.DEFAULT_IMPORT_DIR_NAME)
-            .switchIfEmpty(folderOperate.create(FileConst.DEFAULT_FOLDER_ROOT_ID,
-                FileConst.DEFAULT_IMPORT_DIR_NAME)
-                .doOnSuccess(folder -> log.info("create links dir and id={}", folder.getId())))
-            .map(Folder::getId)
-            .flatMap(linksFolderId -> handleImportDirFile(linksDir, linksFolderId))
+        handleImportDirFile(linksDir, DEFAULT_FOLDER_ROOT_ID)
             .subscribeOn(Schedulers.parallel())
             .subscribe();
-
 
         log.info("end import links dir files, time: {}", System.currentTimeMillis() - start);
     }
