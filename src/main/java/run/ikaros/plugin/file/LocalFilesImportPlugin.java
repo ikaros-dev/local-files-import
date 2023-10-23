@@ -3,18 +3,16 @@ package run.ikaros.plugin.file;
 import org.pf4j.PluginWrapper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
-import org.springframework.util.Assert;
-import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import run.ikaros.api.constant.FileConst;
-import run.ikaros.api.core.file.FileOperate;
-import run.ikaros.api.core.file.Folder;
-import run.ikaros.api.core.file.FolderOperate;
+import run.ikaros.api.core.attachment.Attachment;
+import run.ikaros.api.core.attachment.AttachmentOperate;
 import run.ikaros.api.infra.properties.IkarosProperties;
 import run.ikaros.api.infra.utils.FileUtils;
 import run.ikaros.api.plugin.BasePlugin;
+import run.ikaros.api.store.enums.AttachmentType;
 
 import java.io.File;
 import java.io.IOException;
@@ -28,21 +26,20 @@ import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
 
 import static run.ikaros.api.constant.FileConst.DEFAULT_FOLDER_ROOT_ID;
+import static run.ikaros.api.core.attachment.AttachmentConst.ROOT_DIRECTORY_ID;
 
 @Slf4j
 @Component
 public class LocalFilesImportPlugin extends BasePlugin {
     private static final String NAME = "PluginLocalFilesImport";
     private final IkarosProperties ikarosProperties;
-    private final FileOperate fileOperate;
-    private final FolderOperate folderOperate;
+    private final AttachmentOperate attachmentOperate;
 
     public LocalFilesImportPlugin(PluginWrapper wrapper, IkarosProperties ikarosProperties,
-                                  FileOperate fileOperate, FolderOperate folderOperate) {
+                                  AttachmentOperate attachmentOperate) {
         super(wrapper);
         this.ikarosProperties = ikarosProperties;
-        this.fileOperate = fileOperate;
-        this.folderOperate = folderOperate;
+        this.attachmentOperate = attachmentOperate;
     }
 
 
@@ -77,53 +74,11 @@ public class LocalFilesImportPlugin extends BasePlugin {
             log.info("mkdir links dir, path={}", linksDir);
         }
 
-        handleImportDirFile(linksDir, DEFAULT_FOLDER_ROOT_ID)
+        handleImportDirFile(linksDir, 0L)
             .subscribeOn(Schedulers.parallel())
             .subscribe();
 
         log.info("end import links dir files, time: {}", System.currentTimeMillis() - start);
-    }
-
-    private run.ikaros.api.core.file.File handleSingle(File file, Long parentId)
-        throws IOException {
-        // 创建上传文件目录
-        String name = file.getName();
-        String filePostfix = FileUtils.parseFilePostfix(name);
-        String uploadFilePath
-            = FileUtils.buildAppUploadFilePath(
-            ikarosProperties.getWorkDir().toFile().getAbsolutePath(),
-            filePostfix);
-        File uploadFile = new File(uploadFilePath);
-
-
-        try {
-            Files.createLink(uploadFile.toPath(), file.toPath());
-            log.info("copy file hard link from: {}, to: {}",
-                file.getAbsolutePath(), uploadFile.getAbsolutePath());
-        } catch (FileAlreadyExistsException fileAlreadyExistsException) {
-            log.warn("file already exists for path: [{}].", uploadFile.getAbsolutePath());
-            return null;
-        } catch (FileSystemException fileSystemException) {
-            // 硬链接失败则进行复制
-            log.warn("file hard links fail from: {}, to: {}",
-                file.getAbsolutePath(), uploadFile.getAbsolutePath());
-            Files.copy(file.toPath(), uploadFile.toPath());
-            log.info("copy file from: {}, to: {}",
-                file.getAbsolutePath(), uploadFile.getAbsolutePath());
-        }
-
-        run.ikaros.api.core.file.File fileDto = new run.ikaros.api.core.file.File();
-        fileDto.setFolderId(parentId);
-        fileDto.setName(name);
-        fileDto.setType(FileUtils.parseTypeByPostfix(filePostfix));
-        fileDto.setUrl(
-            uploadFilePath.replace(ikarosProperties.getWorkDir().toFile().getAbsolutePath(), "")
-                .replace("\\", "/"));
-        fileDto.setCanRead(true);
-        fileDto.setFsPath(uploadFile.getAbsolutePath());
-        fileDto.setSize(file.length());
-        fileDto.setUpdateTime(LocalDateTime.now());
-        return fileDto;
     }
 
 
@@ -134,11 +89,17 @@ public class LocalFilesImportPlugin extends BasePlugin {
                 return Mono.empty();
             }
             // dir
-            return folderOperate.create(parentId, file.getName())
-                .map(Folder::getId)
-                .flatMapMany(id -> Flux.fromStream(Arrays.stream(
-                        Objects.requireNonNull(file.listFiles())))
-                    .flatMap(file1 -> handleImportDirFile(file1, id)))
+            return Mono.just(Attachment.builder()
+                    .type(AttachmentType.Directory)
+                    .parentId(parentId)
+                    .name(file.getName())
+                    .updateTime(LocalDateTime.now())
+                    .fsPath(file.getAbsolutePath())
+                    .build())
+                .flatMap(attachmentOperate::save)
+                .flatMapMany(attachment -> Flux.fromArray(Objects.requireNonNull(file.listFiles()))
+                    .flatMap(file1 -> handleImportDirFile(file1, attachment.getId()))
+                )
                 .then();
         } else {
             // file
@@ -146,18 +107,50 @@ public class LocalFilesImportPlugin extends BasePlugin {
                 return Mono.empty();
             }
 
+            // 创建上传文件目录
+            String name = file.getName();
+            String filePostfix = FileUtils.parseFilePostfix(name);
+            String uploadFilePath
+                = FileUtils.buildAppUploadFilePath(
+                ikarosProperties.getWorkDir().toFile().getAbsolutePath(),
+                filePostfix);
+            File uploadFile = new File(uploadFilePath);
 
 
-            return fileOperate.existsByFolderIdAndFileName(parentId, file.getName())
-                .filter(exist -> !exist)
-                .flatMap(exists -> {
-                    try {
-                        return fileOperate.create(handleSingle(file, parentId)).then();
-                    } catch (IOException e) {
-                        return Mono.error(new RuntimeException(e));
-                    }
-                });
+            try {
+                Files.createLink(uploadFile.toPath(), file.toPath());
+                log.info("copy file hard link from: {}, to: {}",
+                    file.getAbsolutePath(), uploadFile.getAbsolutePath());
+            } catch (FileAlreadyExistsException fileAlreadyExistsException) {
+                log.warn("file already exists for path: [{}].", uploadFile.getAbsolutePath());
+                return null;
+            } catch (IOException fileSystemException) {
+                // 硬链接失败则进行复制
+                log.warn("file hard links fail from: {}, to: {}",
+                    file.getAbsolutePath(), uploadFile.getAbsolutePath());
+                try {
+                    Files.copy(file.toPath(), uploadFile.toPath());
+                    log.info("copy file from: {}, to: {}",
+                        file.getAbsolutePath(), uploadFile.getAbsolutePath());
+                } catch (IOException e) {
+                    log.error("skip operate, copy file fail from: {}, to: {}"
+                        , file.getAbsolutePath(), uploadFile.getAbsolutePath()
+                        , e);
+                    throw new RuntimeException(e);
+                }
+            }
 
+            Attachment attachment = Attachment.builder()
+                .parentId(parentId).name(name).type(AttachmentType.File)
+                .fsPath(file.getAbsolutePath()).size(file.length()).updateTime(LocalDateTime.now())
+                .url(
+                    uploadFilePath.replace(ikarosProperties.getWorkDir().toFile().getAbsolutePath(),
+                            "")
+                        .replace("\\", "/")).build();
+
+            return Mono.just(attachment)
+                .flatMap(attachmentOperate::save)
+                .then();
         }
     }
 }
