@@ -3,6 +3,7 @@ package run.ikaros.plugin.file;
 import org.pf4j.PluginWrapper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+import org.springframework.util.Assert;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -17,16 +18,11 @@ import run.ikaros.api.store.enums.AttachmentType;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
-import java.util.Arrays;
 import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
-
-import static run.ikaros.api.constant.FileConst.DEFAULT_FOLDER_ROOT_ID;
-import static run.ikaros.api.core.attachment.AttachmentConst.ROOT_DIRECTORY_ID;
 
 @Slf4j
 @Component
@@ -83,23 +79,26 @@ public class LocalFilesImportPlugin extends BasePlugin {
 
 
     private Mono<Void> handleImportDirFile(File file, Long parentId) {
+        Assert.notNull(file, "'file' must not null");
+        Assert.isTrue(parentId >= 0, "'parentId' must >= 0");
+        log.debug("current file: {}", file.getAbsolutePath());
+        log.debug("current parentId: {}", parentId);
         if (file.isDirectory()) {
             // ignore . and .. create dir.
             if (".".equalsIgnoreCase(file.getName()) || "..".equalsIgnoreCase(file.getName())) {
                 return Mono.empty();
             }
             // dir
-            return Mono.just(Attachment.builder()
-                    .type(AttachmentType.Directory)
-                    .parentId(parentId)
-                    .name(file.getName())
-                    .updateTime(LocalDateTime.now())
-                    .fsPath(file.getAbsolutePath())
-                    .build())
-                .flatMap(attachmentOperate::save)
+            return attachmentOperate.findByTypeAndParentIdAndName(
+                    AttachmentType.Directory, parentId, file.getName())
+                .switchIfEmpty(attachmentOperate.createDirectory(parentId, file.getName())
+                    .checkpoint("create directory for parentId=" + parentId
+                        + " and file=" + file.getAbsolutePath()))
                 .flatMapMany(attachment -> Flux.fromArray(Objects.requireNonNull(file.listFiles()))
-                    .flatMap(file1 -> handleImportDirFile(file1, attachment.getId()))
-                )
+                    .flatMap(file1 -> handleImportDirFile(file1, attachment.getId())
+                        .checkpoint("call handleImportDirFile by "
+                            + "parentId=" + attachment.getId() + " and file=" +
+                            file1.getAbsolutePath())))
                 .then();
         } else {
             // file
