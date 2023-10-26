@@ -141,11 +141,12 @@ public class LocalFilesImportPlugin extends BasePlugin {
 
             Attachment attachment = Attachment.builder()
                 .parentId(parentId).name(name).type(AttachmentType.File)
-                .fsPath(file.getAbsolutePath()).size(file.length()).updateTime(LocalDateTime.now())
-                .url(
-                    uploadFilePath.replace(ikarosProperties.getWorkDir().toFile().getAbsolutePath(),
-                            "")
-                        .replace("\\", "/")).build();
+                .fsPath(uploadFile.getAbsolutePath()).size(uploadFile.length())
+                .updateTime(LocalDateTime.now())
+                .url(uploadFilePath
+                    .replace(ikarosProperties.getWorkDir().toFile().getAbsolutePath(),
+                        "")
+                    .replace("\\", "/")).build();
 
             return Mono.just(attachment)
                 .flatMap(attachmentOperate::save)
