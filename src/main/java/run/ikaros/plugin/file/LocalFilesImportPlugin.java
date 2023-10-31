@@ -91,9 +91,16 @@ public class LocalFilesImportPlugin extends BasePlugin {
             // dir
             return attachmentOperate.findByTypeAndParentIdAndName(
                     AttachmentType.Directory, parentId, file.getName())
+                .doOnSuccess(attachment ->
+                    log.debug("{} dir attachment for logic path[{}] "
+                            + "by find by type[Directory] and parentId[{}]",
+                        Objects.isNull(attachment) ? "NotExists" : "Exists",
+                        Objects.isNull(attachment) ? null : attachment.getPath(), parentId))
                 .switchIfEmpty(attachmentOperate.createDirectory(parentId, file.getName())
                     .checkpoint("create directory for parentId=" + parentId
-                        + " and file=" + file.getAbsolutePath()))
+                        + " and file=" + file.getAbsolutePath())
+                    .doOnSuccess(attachment ->
+                        log.debug("Create dir attachment[{}].", attachment.getPath())))
                 .flatMapMany(attachment -> Flux.fromArray(Objects.requireNonNull(file.listFiles()))
                     .flatMap(file1 -> handleImportDirFile(file1, attachment.getId())
                         .checkpoint("call handleImportDirFile by "
@@ -106,51 +113,69 @@ public class LocalFilesImportPlugin extends BasePlugin {
                 return Mono.empty();
             }
 
-            // 创建上传文件目录
-            String name = file.getName();
-            String filePostfix = FileUtils.parseFilePostfix(name);
-            String uploadFilePath
-                = FileUtils.buildAppUploadFilePath(
-                ikarosProperties.getWorkDir().toFile().getAbsolutePath(),
-                filePostfix);
-            File uploadFile = new File(uploadFilePath);
+            // 如果数据库对应目录存在对应附件，也直接返回
+            return attachmentOperate.findByTypeAndParentIdAndName(AttachmentType.File,
+                    parentId, file.getName())
+                .map(attachment -> {
+                    log.debug("Skip linkAndSaveAttachment operate for file attachment exists, path[{}].",
+                        attachment.getPath());
+                    return attachment;
+                })
+                .switchIfEmpty(linkAndSaveAttachment(file, parentId))
+                .then();
+        }
+    }
 
+    private Mono<Attachment> linkAndSaveAttachment(File file, Long parentId) {
+        // 创建上传文件目录
+        String name = file.getName();
+        String filePostfix = FileUtils.parseFilePostfix(name);
+        String uploadFilePath
+            = FileUtils.buildAppUploadFilePath(
+            ikarosProperties.getWorkDir().toFile().getAbsolutePath(),
+            filePostfix);
+        File uploadFile = new File(uploadFilePath);
 
-            try {
-                Files.createLink(uploadFile.toPath(), file.toPath());
-                log.info("copy file hard link from: {}, to: {}",
-                    file.getAbsolutePath(), uploadFile.getAbsolutePath());
-            } catch (FileAlreadyExistsException fileAlreadyExistsException) {
-                log.warn("file already exists for path: [{}].", uploadFile.getAbsolutePath());
-                return null;
-            } catch (IOException fileSystemException) {
-                // 硬链接失败则进行复制
-                log.warn("file hard links fail from: {}, to: {}",
-                    file.getAbsolutePath(), uploadFile.getAbsolutePath());
+        return Mono.just(uploadFile)
+            .publishOn(Schedulers.boundedElastic())
+            .map(file1 -> {
+                log.debug("Attachment not exists, will link and save for parentId[{}] "
+                    + "and exists import file[{}]", parentId, file.getAbsolutePath());
                 try {
-                    Files.copy(file.toPath(), uploadFile.toPath());
-                    log.info("copy file from: {}, to: {}",
+                    Files.createLink(uploadFile.toPath(), file.toPath());
+                    log.info("copy file hard link from: {}, to: {}",
                         file.getAbsolutePath(), uploadFile.getAbsolutePath());
-                } catch (IOException e) {
-                    log.error("skip operate, copy file fail from: {}, to: {}"
-                        , file.getAbsolutePath(), uploadFile.getAbsolutePath()
-                        , e);
-                    throw new RuntimeException(e);
+                    return file1;
+                } catch (FileAlreadyExistsException fileAlreadyExistsException) {
+                    log.warn("file already exists for path: [{}].", uploadFile.getAbsolutePath());
+                    return file1;
+                } catch (IOException fileSystemException) {
+                    // 硬链接失败则进行复制
+                    log.warn("file hard links fail from: {}, to: {}",
+                        file.getAbsolutePath(), uploadFile.getAbsolutePath());
+                    try {
+                        Files.copy(file.toPath(), uploadFile.toPath());
+                        log.info("copy file from: {}, to: {}",
+                            file.getAbsolutePath(), uploadFile.getAbsolutePath());
+                        return file1;
+                    } catch (IOException e) {
+                        log.error("skip operate, copy file fail from: {}, to: {}"
+                            , file.getAbsolutePath(), uploadFile.getAbsolutePath()
+                            , e);
+                        throw new RuntimeException(e);
+                    }
                 }
-            }
-
-            Attachment attachment = Attachment.builder()
+            })
+            .map(f -> Attachment.builder()
                 .parentId(parentId).name(name).type(AttachmentType.File)
                 .fsPath(uploadFile.getAbsolutePath()).size(uploadFile.length())
                 .updateTime(LocalDateTime.now())
                 .url(uploadFilePath
                     .replace(ikarosProperties.getWorkDir().toFile().getAbsolutePath(),
                         "")
-                    .replace("\\", "/")).build();
-
-            return Mono.just(attachment)
-                .flatMap(attachmentOperate::save)
-                .then();
-        }
+                    .replace("\\", "/")).build())
+            .flatMap(f -> attachmentOperate.save(f)
+                .doOnSuccess(atta -> log.debug("Success link and save single attachment[{}].",
+                    atta.getPath())));
     }
 }
